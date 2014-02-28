@@ -1,0 +1,102 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta http-equiv="Content-Style-Type" content="text/css" />
+  <meta name="generator" content="pandoc" />
+  <title></title>
+  <style type="text/css">code{white-space: pre;}</style>
+  <style type="text/css">
+table.sourceCode, tr.sourceCode, td.lineNumbers, td.sourceCode {
+  margin: 0; padding: 0; vertical-align: baseline; border: none; }
+table.sourceCode { width: 100%; line-height: 100%; }
+td.lineNumbers { text-align: right; padding-right: 4px; padding-left: 4px; color: #aaaaaa; border-right: 1px solid #aaaaaa; }
+td.sourceCode { padding-left: 5px; }
+code > span.kw { color: #007020; font-weight: bold; }
+code > span.dt { color: #902000; }
+code > span.dv { color: #40a070; }
+code > span.bn { color: #40a070; }
+code > span.fl { color: #40a070; }
+code > span.ch { color: #4070a0; }
+code > span.st { color: #4070a0; }
+code > span.co { color: #60a0b0; font-style: italic; }
+code > span.ot { color: #007020; }
+code > span.al { color: #ff0000; font-weight: bold; }
+code > span.fu { color: #06287e; }
+code > span.er { color: #ff0000; font-weight: bold; }
+  </style>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+<body>
+<h1 id="an-introduction-to-lenses">An introduction to lenses</h1>
+<p>This is a literate Haskell introduction to Lenses. Total rip-off of an excellent presentation by Simon Peyton Jones <a href="https://skillsmatter.com/skillscasts/%204251-lenses-compositional-data-access-and-manipulation">“Lenses: Compositional data access and manipulation”</a>.</p>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">{-# LANGUAGE RankNTypes #-}</span>
+<span class="kw">module</span> <span class="dt">Lenses</span> <span class="kw">where</span></code></pre>
+<h2 id="whats-in-a-lense">What’s in a lense ?</h2>
+<p>Let’s start with simple nested records</p>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">Person</span> <span class="fu">=</span> <span class="dt">P</span> { name <span class="ot">∷</span> <span class="dt">String</span>
+                , addr <span class="ot">∷</span> <span class="dt">Address</span>
+                , salary <span class="ot">∷</span> <span class="dt">Int</span> } <span class="kw">deriving</span> (<span class="dt">Show</span>)</code></pre>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">Address</span> <span class="fu">=</span> <span class="dt">A</span> { road <span class="ot">∷</span> <span class="dt">String</span>
+                 , city <span class="ot">∷</span> <span class="dt">String</span>
+                 , postcode <span class="ot">∷</span> <span class="dt">String</span> } <span class="kw">deriving</span> (<span class="dt">Show</span>)</code></pre>
+<p>We already have the getters. <code>addr</code> is such a thing. Let’s define some setters using record notation</p>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell">setName <span class="ot">∷</span> <span class="dt">String</span> <span class="ot">→</span> <span class="dt">Person</span> <span class="ot">→</span> <span class="dt">Person</span>
+setName n p <span class="fu">=</span> p { name <span class="fu">=</span> n }</code></pre>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell">setPostcode <span class="ot">∷</span> <span class="dt">String</span> <span class="ot">→</span> <span class="dt">Person</span> <span class="ot">→</span> <span class="dt">Person</span>
+setPostcode pc p
+  <span class="fu">=</span> p { addr <span class="fu">=</span> (addr p) { postcode <span class="fu">=</span> pc } }</code></pre>
+<p>This quickly becomes cumbersome. We want to able to compose things. Let’s simply define a type embedding a getter and a setter:</p>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">LensR</span> a b <span class="fu">=</span> <span class="dt">L</span> { viewR <span class="ot">∷</span> a <span class="ot">→</span> b
+                   , setR <span class="ot">∷</span> b <span class="ot">→</span> a <span class="ot">→</span> a }</code></pre>
+<p>Defining composition is straightforward</p>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell">composeL <span class="ot">∷</span> <span class="dt">LensR</span> a b <span class="ot">→</span> <span class="dt">LensR</span> b c <span class="ot">→</span> <span class="dt">LensR</span> a c
+composeL (<span class="dt">L</span> v1 s1) (<span class="dt">L</span> v2 s2) <span class="fu">=</span>
+  <span class="dt">L</span> (v2 <span class="fu">.</span> v1)
+    (λ x s <span class="ot">→</span> s1 (s2 x (v1 s)) s)</code></pre>
+<p>However this is clearly inefficient if we want to modify a field</p>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell">over <span class="ot">∷</span> <span class="dt">LensR</span> s a <span class="ot">→</span> (a <span class="ot">→</span> a) <span class="ot">→</span> s <span class="ot">→</span> s
+over l f s <span class="fu">=</span> setR l (f (viewR l s)) s</code></pre>
+<p>We could add a method to do this efficiently instead of using this combination. But yet, we may also add other methods do deal with <code>Maybe</code> or <code>IO</code></p>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">LensR&#39;</span> a b <span class="fu">=</span> <span class="dt">L&#39;</span> { viewR&#39; <span class="ot">∷</span> a <span class="ot">→</span> b
+                     , setR&#39; <span class="ot">∷</span> b <span class="ot">→</span> a <span class="ot">→</span> a
+                     , mod <span class="ot">∷</span> (b <span class="ot">→</span> b) <span class="ot">→</span> a <span class="ot">→</span> a
+                     , modMaybe <span class="ot">∷</span> (b <span class="ot">→</span> <span class="dt">Maybe</span> b) <span class="ot">→</span> a <span class="ot">→</span> <span class="dt">Maybe</span> a
+                     , modIO <span class="ot">∷</span> (b <span class="ot">→</span> <span class="dt">IO</span> b) <span class="ot">→</span> a <span class="ot">→</span> <span class="dt">IO</span> a }</code></pre>
+<p>The last two lines look quite similar. They are instances of</p>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">Lens&#39;</span> s a <span class="fu">=</span> forall f<span class="fu">.</span> <span class="dt">Functor</span> f
+                        <span class="ot">=&gt;</span> (a <span class="ot">→</span> f a) <span class="ot">→</span> s <span class="ot">→</span> f s</code></pre>
+<p>for the <code>Maybe</code> and <code>IO</code> functors.</p>
+<h2 id="equivalence-between-lensr-and-lens">Equivalence between <code>LensR</code> and <code>Lens'</code></h2>
+<p>Let’s start by constructing a <code>LensR</code> from a <code>Lens'</code>. First the setter: <code>f s</code> must be isomorphic to <code>s</code> in order to get the signature right.</p>
+<p>Let’s define the identity functor:</p>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">Id</span> a <span class="fu">=</span> <span class="dt">Id</span> a
+
+runId <span class="ot">∷</span> <span class="dt">Id</span> a <span class="ot">→</span> a
+runId (<span class="dt">Id</span> x) <span class="fu">=</span> x
+
+<span class="kw">instance</span> <span class="dt">Functor</span> <span class="dt">Id</span> <span class="kw">where</span>
+  fmap f <span class="fu">=</span> <span class="dt">Id</span> <span class="fu">.</span> f <span class="fu">.</span> runId</code></pre>
+<p>and let’s try to get a setter out of a <code>Lens'</code></p>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell">set <span class="ot">∷</span> <span class="dt">Lens&#39;</span> s a <span class="ot">→</span> a <span class="ot">→</span> s <span class="ot">→</span> s
+set ln x <span class="fu">=</span> runId <span class="fu">.</span> ln (λ _ <span class="ot">→</span> <span class="dt">Id</span> x)</code></pre>
+<p>For the getter we need <code>f s</code> to be isomorphic to <code>a</code>. Let’s introduce the functor <code>Const</code></p>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">Const</span> a b <span class="fu">=</span> <span class="dt">Const</span> a
+
+runConst <span class="ot">∷</span> <span class="dt">Const</span> a b <span class="ot">→</span> a
+runConst (<span class="dt">Const</span> x) <span class="fu">=</span> x
+
+<span class="kw">instance</span> <span class="dt">Functor</span> (<span class="dt">Const</span> a) <span class="kw">where</span>
+  fmap _ (<span class="dt">Const</span> x) <span class="fu">=</span> <span class="dt">Const</span> x</code></pre>
+<p>Using this functor, we can mimic the construction of the setter above.</p>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell">get <span class="ot">∷</span> <span class="dt">Lens&#39;</span> s a <span class="ot">→</span> s <span class="ot">→</span> a
+get ln <span class="fu">=</span> runConst <span class="fu">.</span> ln <span class="dt">Const</span></code></pre>
+<p>That’s it ! It’s as easy to make the <code>mod</code> function</p>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell">modify <span class="ot">∷</span> <span class="dt">Lens&#39;</span> s a <span class="ot">→</span> (a <span class="ot">→</span> a) <span class="ot">→</span> s <span class="ot">→</span> s
+modify ln f <span class="fu">=</span> runId <span class="fu">.</span> ln (<span class="dt">Id</span> <span class="fu">.</span> f)</code></pre>
+<p>To get functions like <code>modMaybe</code> or <code>modIO</code>, no additional work is required since these functions already have the same form as our lense.</p>
+<p>We now turn to the task of constructing a <code>Lens'</code> from a <code>LensR</code>.</p>
+<pre class="sourceCode literate haskell"><code class="sourceCode haskell">lens <span class="ot">∷</span> (s <span class="ot">→</span> a) <span class="ot">→</span> (a <span class="ot">→</span> s <span class="ot">→</span> s) <span class="ot">→</span> <span class="dt">Lens&#39;</span> s a
+lens viewer setter f <span class="fu">=</span> λ s <span class="ot">→</span> fmap (λ a <span class="ot">→</span> setter a s) (f <span class="fu">$</span> viewer s)</code></pre>
+</body>
+</html>
